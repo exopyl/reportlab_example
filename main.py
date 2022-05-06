@@ -5,7 +5,10 @@
 #
 
 import pandas as pd
+import numpy
 from datetime import datetime
+import matplotlib.pyplot as plt
+import io
 
 from reportlab.pdfgen import canvas
 from reportlab.lib import utils,colors
@@ -82,21 +85,36 @@ class ReportPdf():
 
         self.elements.append(PageBreak())
 
-    def add_page(self, title, df):
+    def add_page(self, title, contents):
         styles = getSampleStyleSheet()
         style_page_title = ParagraphStyle(name='page_title', parent=styles['Heading1'], alignment=TA_LEFT)
 
         self.elements.append(Paragraph(title, style_page_title))
         self.elements.append(Spacer(10, 22))
 
-        table_content = [df.columns[:,].values.astype(str).tolist()] + df.values.tolist()
-        table=Table(table_content)
-        table_content_style = TableStyle([  ('TEXTCOLOR',(0,0),(-1,0),colors.red),
-                                    ('INNERGRID', (0,0), (-1,-1), 0.25, colors.black),
-                                    ('BOX',(0,0),(-1,-1),1,colors.black)])
-        table.setStyle(table_content_style)
+        for content in contents:
+            if isinstance(content, pd.DataFrame):
+                df = content
+                df = df.round(decimals = 3) # keep 3 decimals
+                df = df.reset_index() # reset the index to consider it as a column
+                table_content = [df.columns[:,].values.astype(str).tolist()] + df.values.tolist()
+                table=Table(table_content, rowHeights=[8]*(len(df)+1))
+                table_content_style = TableStyle([  ('FONTSIZE',(0,0),(-1,-1),4),
+                                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                                            ('TEXTCOLOR',(0,0),(-1,0),colors.red),
+                                            ('INNERGRID', (0,0), (-1,-1), 0.25, colors.black),
+                                            ('BOX',(0,0),(-1,-1),1,colors.black)])
+                table.setStyle(table_content_style)
 
-        self.elements.append(table)
+                self.elements.append(table)
+
+            elif isinstance(content, plt.Figure):
+                fig = content
+                imgBuffer = io.BytesIO()
+                fig.savefig(imgBuffer, format = 'png')
+                imgBuffer.seek(0)
+
+                self.elements.append(Image(imgBuffer))
 
         self.elements.append(PageBreak())
 
@@ -111,15 +129,36 @@ class ReportPdf():
         doc.build(self.elements, canvasmaker=FooterCanvas, onLaterPages=self.onMyLaterPages)
 
 
+# 
+report = ReportPdf("report", "logo.png")
+
+# page with a dataframe
 data = [['a1', 'b1', 'c1'],
         ['a2', 'b2', 'c2'],
         ['a3', 'b3', 'c3'],
         ['a4', 'b4', 'c4']]
 columns = ['column1', 'column2', 'column3']
-
 df = pd.DataFrame(data, columns=columns)
 
-report = ReportPdf("report", "logo.png")
-report.add_page("Element", df)
-report.add_page("Element 2", df)
+report.add_page("Element", [df])
+
+# page with a figure
+n = 50
+start = pd.to_datetime('2022-01-01')
+dates = pd.date_range(start, periods=n)
+data = [numpy.cos(i*numpy.pi/n) for i in range(n)]
+df = pd.DataFrame({'date': dates, 'value': data}) 
+df.set_index("date", inplace=True)
+
+fig = plt.figure(figsize=(7, 7), dpi=50)
+fig.add_subplot(111)
+df['value'].plot()
+plt.title("cos")
+#fig.savefig("cos.png")
+
+report.add_page("Element 2", [fig, df])
+
+plt.close()
+
+# write the pdf file
 report.save("report.pdf")
